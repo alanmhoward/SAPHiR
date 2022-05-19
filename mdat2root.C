@@ -32,8 +32,8 @@ struct Header{
 struct Event{
   uint16_t xpos;           // Position along tube
   uint16_t ypos;           // Tube location
-  uint8_t modID;           // ID of the MPSD
-  uint8_t slotID;          // ID of the tube
+  uint16_t modID;          // ID of the MPSD
+  uint16_t slotID;         // ID of the tube
   uint16_t amp;            // Combined signal amplitude (both tube signals summed)
   uint64_t time;           // Time stamp, units of 100 ns 
   uint8_t eventID;         // 0 for real events, 1 for self triggers 
