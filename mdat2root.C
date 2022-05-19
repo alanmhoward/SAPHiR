@@ -81,8 +81,8 @@ void ReadHeader(ifstream &infile){
 int ReadBuffer(ifstream &infile){
 
   ReadWord(infile, header.bufferlength);  // Length of the buffer
-  ReadWord(infile, header.buffertype);    // Should be 0x0002
-  if(header.buffertype != 0x0002){
+  ReadWord(infile, header.buffertype);    // Should be 0x0001
+  if(header.buffertype != 0x0001){
     return 1;
   }
   ReadWord(infile, header.headerlength);  // Should be constant
