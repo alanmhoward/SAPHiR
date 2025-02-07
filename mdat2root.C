@@ -1,7 +1,8 @@
 // Convert qmesydaq mdat files to ROOT format
-// For use with MPSD + MPCD setups
-// This version assumes the tubes are stacked vertically such that the x position is along the tube and the y position is the tube ID (contructed from the slotID and modID parameters)
-// Only 3 bits are used for slotID - officially 5 bits are reserved but the 2 most significant bits aren't used (since only 8 double ended tubes can be connected per MPSD)
+// See the Mesytec PSD+ Data Format Description manual for full details of the file format
+
+// This version is for the SaPHIR setup using MCPD + MPSD modules.
+// The x coordinate is along the tube and the y coordinate is given from the tubeID (construvted from mcpdID, modID and slotID)
 
 // -------------------------------------------------------------------//
 // ------------------------- Global variables ------------------------//
@@ -10,7 +11,7 @@
 // Masks for extracting amp, pos etc. from 48 bit event block
 ULong64_t mask_eventID = 0b100000000000000000000000000000000000000000000000;
 ULong64_t mask_modID =   0b011100000000000000000000000000000000000000000000;
-ULong64_t mask_slotID =  0b000000111000000000000000000000000000000000000000;
+ULong64_t mask_slotID =  0b000011111000000000000000000000000000000000000000;
 ULong64_t mask_amp =     0b000000000111111111100000000000000000000000000000;
 ULong64_t mask_xpos =    0b000000000000000000011111111110000000000000000000;
 ULong64_t mask_time =    0b000000000000000000000000000001111111111111111111;
@@ -108,6 +109,8 @@ int ReadBuffer(ifstream &infile){
 void ReadEvent(ifstream &infile){
   uint64_t rawevent;
   ReadEntry(infile, rawevent);
+  // eventID is 0 for neutrons, 1 for monitor input
+  // The structure of the remaining event is different 
   event.eventID = (rawevent & mask_eventID) >> 47;
   event.amp = (rawevent & mask_amp) >> 29;
   event.ypos = ((rawevent & mask_slotID) >> 39) | ((rawevent & mask_modID) >> 41);
