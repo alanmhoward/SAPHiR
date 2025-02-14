@@ -1,20 +1,34 @@
 // Convert qmesydaq mdat files to ROOT format
-// See the Mesytec PSD+ Data Format Description manual for full details of the file format
-
-// This version is for the SaPHIR setup using MCPD + MPSD modules.
-// The x coordinate is along the tube and the y coordinate is given from the tubeID (construvted from mcpdID, modID and slotID)
+// For use with MPSD + MPCD setups
+// This version assumes the tubes are stacked vertically such that the x position is along the tube and the y position is the tube ID (contructed from the slotID and modID parameters)
+// Only 3 bits are used for slotID - officially 5 bits are reserved but the 2 most significant bits aren't used (since only 8 double ended tubes can be connected per MPSD)
 
 // -------------------------------------------------------------------//
 // ------------------------- Global variables ------------------------//
 // -------------------------------------------------------------------//
 
-// Masks for extracting amp, pos etc. from 48 bit event block
+// Masks for extracting parameters from 48-bit event block
+// eventID: 0 for 'neutron' events (tube signals), 1 for trigger (e.g. monitor, chopper) events
+// modID: MPSD module ID inside a single MCPD module, values from 0-7
+// slotID: Channel ID inside a single MPSD module, values from 0-7
+// amp: amplitude, calculated internally in the MPSD from left and right signals
+// xpos: interaction position along tube, based on ratio of amplitudes
+// time: 19 bit fine timestamp (counts up to 52.4 ms with 100-ns time bins). Combine with the header timestamp to get the absolute event time.
 ULong64_t mask_eventID = 0b100000000000000000000000000000000000000000000000;
 ULong64_t mask_modID =   0b011100000000000000000000000000000000000000000000;
-ULong64_t mask_slotID =  0b000011111000000000000000000000000000000000000000;
+ULong64_t mask_slotID =  0b000000111000000000000000000000000000000000000000;
 ULong64_t mask_amp =     0b000000000111111111100000000000000000000000000000;
 ULong64_t mask_xpos =    0b000000000000000000011111111110000000000000000000;
 ULong64_t mask_time =    0b000000000000000000000000000001111111111111111111;
+
+// Masks for extracting data from trigger event blocks (eventID==1)
+// trigID: event trigger source, timer 1-4 get ID 1-4, rear panel TTL inputs get ID 5-6, ID 7 is for compare register (?)
+// dataID: data source, front panel inputs 0-3 get ID 0-3, rear inputs get ID 4-5, ADC1,2 get ID 6,7
+// tData: Counter, timer or ADC value of source. Dpeending on source, not all bits may be valid
+ULong64_t mask_trigID =  0b011100000000000000000000000000000000000000000000;
+ULong64_t mask_dataID =  0b000011110000000000000000000000000000000000000000;
+ULong64_t mask_tData =   0b000000001111111111111111111110000000000000000000;
+
 
 
 // Header parameters
@@ -41,9 +55,12 @@ struct Event{
   uint16_t slotID;         // ID of the tube
   uint16_t amp;            // Combined signal amplitude (both tube signals summed)
   uint64_t time;           // Time stamp, units of 100 ns 
-  uint8_t eventID;         // 0 for real events, 1 for self triggers 
+  uint8_t eventID;         // 0 for real events, 1 for self triggers
   uint32_t eventTS;        // The 19 bit time stamp within the buffer
-} event;
+  uint8_t trigID;	   // For trigger events (eventID==1) the trigger source
+  uint8_t dataID;	   // For trigger events (eventID==1) the data source
+  uint32_t tData;  	   // For trigger events (eventID==1) the data package - some data sources may not use all 21 bits available
+}event, event0;        // use event to write current value and event0 as a template to reset the struct after writing to file
 
 
 // -------------------------------------------------------------------//
@@ -109,14 +126,20 @@ int ReadBuffer(ifstream &infile){
 void ReadEvent(ifstream &infile){
   uint64_t rawevent;
   ReadEntry(infile, rawevent);
-  // eventID is 0 for neutrons, 1 for monitor input
-  // The structure of the remaining event is different 
   event.eventID = (rawevent & mask_eventID) >> 47;
-  event.amp = (rawevent & mask_amp) >> 29;
-  event.ypos = ((rawevent & mask_slotID) >> 39) | ((rawevent & mask_modID) >> 41);
-  event.xpos = (rawevent & mask_xpos) >> 19;
-  event.modID = (rawevent & mask_modID) >> 44;
-  event.slotID = (rawevent & mask_slotID) >> 39;
+  // Parameters to be read depend on the event type
+  if (event.eventID==0){
+    event.amp = (rawevent & mask_amp) >> 29;
+    event.ypos = ((rawevent & mask_slotID) >> 39) | ((rawevent & mask_modID) >> 41);
+    event.xpos = (rawevent & mask_xpos) >> 19;
+    event.modID = (rawevent & mask_modID) >> 44;
+    event.slotID = (rawevent & mask_slotID) >> 39;
+  }
+  else if (event.eventID==1){
+    event.trigID = (rawevent & mask_trigID) >> 44;
+    event.dataID = (rawevent & mask_dataID) >> 40;
+    event.tData = (rawevent & mask_tData) >> 19;
+  } 
   event.eventTS = (rawevent & mask_time);
   event.time = event.eventTS + header.headerTS;
 }
@@ -158,6 +181,9 @@ void PrintEvent(){
   cout << "modID: " << event.modID << endl;
   cout << "slotID: " << event.slotID << endl;
   cout << "amp: " << event.amp << endl;
+  cout << "trigID: " << event.trigID << endl;
+  cout << "dataID: " << event.dataID << endl;
+  cout << "tData: " << event.tData << endl;
   cout << "time stamp: " << event.eventTS << endl;
   cout << "absolute time: " << event.time << endl;
   cout << "----------------------------------------------------" << endl;
@@ -192,6 +218,9 @@ void mdat2root(TString filename, int debug=0){
   rawdata->Branch("amp", &event.amp, "amp/s");
   rawdata->Branch("time", &event.time, "time/l");
   rawdata->Branch("eventID", &event.eventID, "eventID/b");
+  rawdata->Branch("trigID", &event.trigID, "trigID/s");
+  rawdata->Branch("dataID", &event.dataID, "dataID/s");
+  rawdata->Branch("tData", &event.tData, "tData/i");
   rawdata->Branch("eventTS", &event.eventTS, "eventTS/i");
   rawdata->Branch("mcpdID", &header.mcpdID, "mcpdID/b");
   rawdata->Branch("status", &header.status, "status/b");
@@ -228,6 +257,9 @@ void mdat2root(TString filename, int debug=0){
       entry_num++;
       rawdata->Fill();
       
+      // Set all event parameters back to zero
+      event = event0;
+      
       // Print info on status
       if (entry_num % 10000 == 0){
         cout << "Processing entry number: " << entry_num << "\r" << flush;
@@ -249,4 +281,3 @@ void mdat2root(TString filename, int debug=0){
   infile.close();
   outfile->Close();
 }
-
